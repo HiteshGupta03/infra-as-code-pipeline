@@ -3,20 +3,11 @@ const cors = require("cors");
 const mysql = require("mysql2/promise");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const { getJwtSecret } = require("./config");
 
 require("dotenv").config();
 
-const jwtSecret = process.env.JWT_SECRET;
-
-if (
-  !jwtSecret ||
-  jwtSecret === "your_jwt_secret_key_here" ||
-  jwtSecret.length < 32
-) {
-  throw new Error(
-    "JWT_SECRET must be a unique, securely generated value of at least 32 characters."
-  );
-}
+const jwtSecret = getJwtSecret(process.env.JWT_SECRET);
 
 const app = express();
 
@@ -120,6 +111,26 @@ app.get("/", (req, res) => {
   res.json({
     message: "MbeautyCakes Backend is running!",
   });
+});
+
+// Backend and Database Health Check
+app.get("/health", async (req, res) => {
+  try {
+    await db.query("SELECT 1");
+
+    res.status(200).json({
+      status: "ok",
+      database: "connected"
+    });
+
+  } catch (error) {
+    console.error("Health check failed:", error.message);
+
+    res.status(503).json({
+      status: "unavailable",
+      database: "disconnected"
+    });
+  }
 });
 
 // =========================

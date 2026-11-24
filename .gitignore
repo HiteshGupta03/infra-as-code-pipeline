@@ -27,3 +27,13 @@ database/schema-current.sql
 .DS_Store
 Thumbs.db
 .vscode/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log
