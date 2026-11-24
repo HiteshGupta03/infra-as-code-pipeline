@@ -20,13 +20,3 @@ variable "github_oidc_provider_arn" {
   description = "ARN of the GitHub Actions OIDC provider"
   type        = string
 }
-
-variable "state_bucket_name" {
-  description = "S3 bucket containing Terraform state"
-  type        = string
-}
-
-variable "lock_table_name" {
-  description = "DynamoDB table used for Terraform state locking"
-  type        = string
-}

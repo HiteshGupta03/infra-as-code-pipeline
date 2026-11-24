@@ -17,9 +17,6 @@ module "security" {
   # GitHub Actions OIDC configuration
   github_repository        = var.github_repository
   github_oidc_provider_arn = var.github_oidc_provider_arn
-
-  state_bucket_name = var.state_bucket_name
-  lock_table_name   = var.lock_table_name
 }
 
 module "registry" {

@@ -34,18 +34,6 @@ variable "github_oidc_provider_arn" {
   type        = string
 }
 
-variable "state_bucket_name" {
-  description = "S3 bucket used for Terraform remote state"
-  type        = string
-  default     = "infra-as-code-pipeline-tfstate-597692077614"
-}
-
-variable "lock_table_name" {
-  description = "DynamoDB table used for Terraform state locking"
-  type        = string
-  default     = "infra-as-code-pipeline-tf-locks"
-}
-
 variable "log_retention_days" {
   description = "CloudWatch log retention period"
   type        = number

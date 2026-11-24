@@ -187,7 +187,7 @@ resource "aws_iam_role" "github_actions" {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
 
-          "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:environment:${var.environment}"
+          "token.actions.githubusercontent.com:sub" = "repo:HiteshGupta03@181136551/infra-as-code-pipeline@1445863299:environment:${var.environment}"
         }
       }
     }]
@@ -203,84 +203,8 @@ data "aws_region" "current" {}
 
 data "aws_partition" "current" {}
 
-# GitHub Actions Terraform State Permissions
-resource "aws_iam_role_policy" "github_actions_state" {
-  name = "${var.project_name}-${var.environment}-github-state"
-  role = aws_iam_role.github_actions.id
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-
-    Statement = [
-      {
-        Sid    = "ListTerraformStateBucket"
-        Effect = "Allow"
-
-        Action = [
-          "s3:ListBucket"
-        ]
-
-        Resource = "arn:${data.aws_partition.current.partition}:s3:::${var.state_bucket_name}"
-
-        Condition = {
-          StringLike = {
-            "s3:prefix" = [
-              "infra-as-code-pipeline/main/terraform.tfstate",
-              "infra-as-code-pipeline/main/terraform.tfstate.tflock",
-              "env:/",
-              "env:/*/infra-as-code-pipeline/main/terraform.tfstate",
-              "env:/*/infra-as-code-pipeline/main/terraform.tfstate.tflock"
-            ]
-          }
-        }
-      },
-      {
-        Sid    = "ReadWriteTerraformState"
-        Effect = "Allow"
-
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject"
-        ]
-
-        Resource = [
-          "arn:${data.aws_partition.current.partition}:s3:::${var.state_bucket_name}/infra-as-code-pipeline/main/terraform.tfstate",
-          "arn:${data.aws_partition.current.partition}:s3:::${var.state_bucket_name}/env:/*/infra-as-code-pipeline/main/terraform.tfstate"
-        ]
-      },
-      {
-        Sid    = "ManageTerraformLockFiles"
-        Effect = "Allow"
-
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject"
-        ]
-
-        Resource = [
-          "arn:${data.aws_partition.current.partition}:s3:::${var.state_bucket_name}/infra-as-code-pipeline/main/terraform.tfstate.tflock",
-          "arn:${data.aws_partition.current.partition}:s3:::${var.state_bucket_name}/env:/*/infra-as-code-pipeline/main/terraform.tfstate.tflock"
-        ]
-      },
-      {
-        Sid    = "ManageTerraformDynamoDBLock"
-        Effect = "Allow"
-
-        Action = [
-          "dynamodb:DescribeTable",
-          "dynamodb:GetItem",
-          "dynamodb:PutItem",
-          "dynamodb:DeleteItem"
-        ]
-
-        Resource = "arn:${data.aws_partition.current.partition}:dynamodb:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:table/${var.lock_table_name}"
-      }
-    ]
-  })
-}
-
-# GitHub Actions AWS Deployment Permissions
+# GitHub Actions Application Deployment Permissions
 resource "aws_iam_role_policy" "github_actions_deploy" {
   name = "${var.project_name}-${var.environment}-github-deploy"
   role = aws_iam_role.github_actions.id
@@ -290,136 +214,16 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
 
     Statement = [
       {
-        Sid    = "ManageRegionalInfrastructure"
+        Sid    = "PushImagesToProjectECRRepositories"
         Effect = "Allow"
 
         Action = [
-          # VPC and networking
-          "ec2:Describe*",
-          "ec2:CreateVpc",
-          "ec2:DeleteVpc",
-          "ec2:ModifyVpcAttribute",
-          "ec2:CreateInternetGateway",
-          "ec2:DeleteInternetGateway",
-          "ec2:AttachInternetGateway",
-          "ec2:DetachInternetGateway",
-          "ec2:CreateSubnet",
-          "ec2:DeleteSubnet",
-          "ec2:ModifySubnetAttribute",
-          "ec2:CreateRouteTable",
-          "ec2:DeleteRouteTable",
-          "ec2:CreateRoute",
-          "ec2:DeleteRoute",
-          "ec2:AssociateRouteTable",
-          "ec2:DisassociateRouteTable",
-          "ec2:CreateSecurityGroup",
-          "ec2:DeleteSecurityGroup",
-          "ec2:AuthorizeSecurityGroupIngress",
-          "ec2:RevokeSecurityGroupIngress",
-          "ec2:AuthorizeSecurityGroupEgress",
-          "ec2:RevokeSecurityGroupEgress",
-          "ec2:CreateTags",
-          "ec2:DeleteTags",
-
-          # Application Load Balancer
-          "elasticloadbalancing:Describe*",
-          "elasticloadbalancing:CreateLoadBalancer",
-          "elasticloadbalancing:DeleteLoadBalancer",
-          "elasticloadbalancing:ModifyLoadBalancerAttributes",
-          "elasticloadbalancing:SetSecurityGroups",
-          "elasticloadbalancing:SetSubnets",
-          "elasticloadbalancing:CreateTargetGroup",
-          "elasticloadbalancing:DeleteTargetGroup",
-          "elasticloadbalancing:ModifyTargetGroup",
-          "elasticloadbalancing:CreateListener",
-          "elasticloadbalancing:DeleteListener",
-          "elasticloadbalancing:ModifyListener",
-          "elasticloadbalancing:CreateRule",
-          "elasticloadbalancing:DeleteRule",
-          "elasticloadbalancing:ModifyRule",
-          "elasticloadbalancing:RegisterTargets",
-          "elasticloadbalancing:DeregisterTargets",
-          "elasticloadbalancing:AddTags",
-          "elasticloadbalancing:RemoveTags",
-
-          # ECS
-          "ecs:Describe*",
-          "ecs:List*",
-          "ecs:CreateCluster",
-          "ecs:DeleteCluster",
-          "ecs:UpdateCluster",
-          "ecs:RegisterTaskDefinition",
-          "ecs:DeregisterTaskDefinition",
-          "ecs:CreateService",
-          "ecs:UpdateService",
-          "ecs:DeleteService",
-          "ecs:RunTask",
-          "ecs:StopTask",
-          "ecs:TagResource",
-          "ecs:UntagResource",
-
-          # RDS
-          "rds:Describe*",
-          "rds:CreateDBSubnetGroup",
-          "rds:DeleteDBSubnetGroup",
-          "rds:ModifyDBSubnetGroup",
-          "rds:CreateDBInstance",
-          "rds:DeleteDBInstance",
-          "rds:ModifyDBInstance",
-          "rds:AddTagsToResource",
-          "rds:RemoveTagsFromResource",
-
-          # CloudWatch Logs
-          "logs:Describe*",
-          "logs:CreateLogGroup",
-          "logs:DeleteLogGroup",
-          "logs:PutRetentionPolicy",
-          "logs:DeleteRetentionPolicy",
-          "logs:TagResource",
-          "logs:UntagResource",
-
-          # ECS Auto Scaling
-          "application-autoscaling:Describe*",
-          "application-autoscaling:RegisterScalableTarget",
-          "application-autoscaling:DeregisterScalableTarget",
-          "application-autoscaling:PutScalingPolicy",
-          "application-autoscaling:DeleteScalingPolicy",
-          "application-autoscaling:TagResource",
-          "application-autoscaling:UntagResource",
-
-          # Resource discovery
-          "resourcegroupstaggingapi:GetResources"
-        ]
-
-        Resource = "*"
-
-        Condition = {
-          StringEquals = {
-            "aws:RequestedRegion" = data.aws_region.current.region
-          }
-        }
-      },
-      {
-        Sid    = "ManageProjectECRRepositories"
-        Effect = "Allow"
-
-        Action = [
-          "ecr:CreateRepository",
-          "ecr:DeleteRepository",
-          "ecr:DescribeRepositories",
-          "ecr:DescribeImages",
           "ecr:BatchCheckLayerAvailability",
           "ecr:BatchGetImage",
-          "ecr:GetDownloadUrlForLayer",
-          "ecr:InitiateLayerUpload",
-          "ecr:UploadLayerPart",
           "ecr:CompleteLayerUpload",
+          "ecr:InitiateLayerUpload",
           "ecr:PutImage",
-          "ecr:PutLifecyclePolicy",
-          "ecr:GetLifecyclePolicy",
-          "ecr:DeleteLifecyclePolicy",
-          "ecr:TagResource",
-          "ecr:UntagResource"
+          "ecr:UploadLayerPart"
         ]
 
         Resource = [
@@ -432,28 +236,52 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Effect   = "Allow"
         Action   = ["ecr:GetAuthorizationToken"]
         Resource = "*"
+
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = data.aws_region.current.region
+          }
+        }
       },
       {
-        Sid    = "ManageProjectIAMRoles"
+        Sid    = "RegisterProjectTaskDefinitions"
         Effect = "Allow"
 
         Action = [
-          "iam:CreateRole",
-          "iam:DeleteRole",
-          "iam:GetRole",
-          "iam:UpdateAssumeRolePolicy",
-          "iam:AttachRolePolicy",
-          "iam:DetachRolePolicy",
-          "iam:ListAttachedRolePolicies",
-          "iam:PutRolePolicy",
-          "iam:GetRolePolicy",
-          "iam:DeleteRolePolicy",
-          "iam:ListRolePolicies",
-          "iam:TagRole",
-          "iam:UntagRole"
+          "ecs:RegisterTaskDefinition",
+          "ecs:TagResource"
         ]
 
-        Resource = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-${var.environment}-*"
+        Resource = [
+          "arn:${data.aws_partition.current.partition}:ecs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:task-definition/${var.project_name}-${var.environment}-frontend:*",
+          "arn:${data.aws_partition.current.partition}:ecs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:task-definition/${var.project_name}-${var.environment}-backend:*"
+        ]
+      },
+      {
+        Sid      = "DescribeProjectTaskDefinitions"
+        Effect   = "Allow"
+        Action   = ["ecs:DescribeTaskDefinition"]
+        Resource = "*"
+
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = data.aws_region.current.region
+          }
+        }
+      },
+      {
+        Sid    = "DeployProjectECSServices"
+        Effect = "Allow"
+
+        Action = [
+          "ecs:DescribeServices",
+          "ecs:UpdateService"
+        ]
+
+        Resource = [
+          "arn:${data.aws_partition.current.partition}:ecs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:service/${var.project_name}-${var.environment}-cluster/${var.project_name}-${var.environment}-frontend",
+          "arn:${data.aws_partition.current.partition}:ecs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:service/${var.project_name}-${var.environment}-cluster/${var.project_name}-${var.environment}-backend"
+        ]
       },
       {
         Sid    = "PassECSRoles"
@@ -471,40 +299,6 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Condition = {
           StringEquals = {
             "iam:PassedToService" = "ecs-tasks.amazonaws.com"
-          }
-        }
-      },
-      {
-        Sid    = "ManageJWTParameter"
-        Effect = "Allow"
-
-        Action = [
-          "ssm:PutParameter",
-          "ssm:GetParameter",
-          "ssm:GetParameters",
-          "ssm:DeleteParameter",
-          "ssm:AddTagsToResource",
-          "ssm:RemoveTagsFromResource"
-        ]
-
-        Resource = "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/${var.environment}/jwt-secret"
-      },
-      {
-        Sid    = "CreateRequiredServiceLinkedRoles"
-        Effect = "Allow"
-
-        Action = [
-          "iam:CreateServiceLinkedRole"
-        ]
-
-        Resource = "*"
-
-        Condition = {
-          StringEquals = {
-            "iam:AWSServiceName" = [
-              "ecs.amazonaws.com",
-              "ecs.application-autoscaling.amazonaws.com"
-            ]
           }
         }
       }
