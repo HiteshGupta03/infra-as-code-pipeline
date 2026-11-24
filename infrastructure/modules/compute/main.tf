@@ -287,7 +287,10 @@ resource "aws_ecs_service" "frontend" {
   }
 
   lifecycle {
-    ignore_changes = [desired_count]
+    ignore_changes = [
+      desired_count,
+      task_definition
+    ]
   }
 
   depends_on = [aws_lb_listener.http]
@@ -331,7 +334,10 @@ resource "aws_ecs_service" "backend" {
   }
 
   lifecycle {
-    ignore_changes = [desired_count]
+    ignore_changes = [
+      desired_count,
+      task_definition
+    ]
   }
 
   depends_on = [aws_lb_listener_rule.backend_api]
