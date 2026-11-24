@@ -23,12 +23,6 @@ variable "vpc_cidr" {
   default     = "10.0.0.0/16"
 }
 
-variable "github_repository" {
-  description = "GitHub repository used for CI/CD"
-  type        = string
-  default     = "HiteshGupta03/infra-as-code-pipeline"
-}
-
 variable "github_oidc_provider_arn" {
   description = "GitHub Actions OIDC provider ARN from bootstrap"
   type        = string

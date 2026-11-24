@@ -15,7 +15,6 @@ module "security" {
   vpc_id = module.networking.vpc_id
 
   # GitHub Actions OIDC configuration
-  github_repository        = var.github_repository
   github_oidc_provider_arn = var.github_oidc_provider_arn
 }
 
