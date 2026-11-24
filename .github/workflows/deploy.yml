@@ -1,0 +1,175 @@
+
+name: Deploy to AWS ECS
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_deploy:
+        description: "Select yes to deploy to the dev environment"
+        required: true
+        type: choice
+        options:
+          - no
+          - yes
+        default: no
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ecs-dev-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy to ECS
+    if: github.ref == 'refs/heads/feature/terraform-bootstrap' && github.event.inputs.confirm_deploy == 'yes'
+
+    runs-on: ubuntu-latest
+    environment: dev
+    timeout-minutes: 40
+
+    env:
+      AWS_REGION: ap-south-1
+      ECS_CLUSTER: infra-as-code-pipeline-dev-cluster
+
+      FRONTEND_SERVICE: infra-as-code-pipeline-dev-frontend
+      BACKEND_SERVICE: infra-as-code-pipeline-dev-backend
+
+      FRONTEND_TASK_FAMILY: infra-as-code-pipeline-dev-frontend
+      BACKEND_TASK_FAMILY: infra-as-code-pipeline-dev-backend
+
+      APPLICATION_URL: http://infra-as-code-pipeline-dev-alb-1895739238.ap-south-1.elb.amazonaws.com
+
+    steps:
+      # 1. Checkout source code
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      # 2. Authenticate using GitHub OIDC
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::597692077614:role/infra-as-code-pipeline-dev-github-actions
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+
+      # 3. Verify AWS identity
+      - name: Verify AWS Identity
+        run: aws sts get-caller-identity
+
+      # 4. Login to Amazon ECR
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2.2.0
+
+      # 5. Build and push frontend and backend images
+      - name: Build and Push Docker Images
+        id: build-images
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          set -euo pipefail
+
+          IMAGE_TAG="${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          FRONTEND_IMAGE="${ECR_REGISTRY}/infra-as-code-pipeline-dev-frontend:${IMAGE_TAG}"
+          BACKEND_IMAGE="${ECR_REGISTRY}/infra-as-code-pipeline-dev-backend:${IMAGE_TAG}"
+
+          echo "Building frontend image..."
+          docker build --pull --tag "$FRONTEND_IMAGE" ./frontend
+          docker push "$FRONTEND_IMAGE"
+
+          echo "Building backend image..."
+          docker build --pull --tag "$BACKEND_IMAGE" ./backend
+          docker push "$BACKEND_IMAGE"
+
+          echo "frontend_image=$FRONTEND_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "backend_image=$BACKEND_IMAGE" >> "$GITHUB_OUTPUT"
+
+      # 6. Download current ECS task definitions
+      - name: Download ECS Task Definitions
+        run: |
+          set -euo pipefail
+
+          aws ecs describe-task-definition \
+            --task-definition "$FRONTEND_TASK_FAMILY" \
+            --query taskDefinition \
+            --output json \
+            > "$RUNNER_TEMP/frontend-task-definition-raw.json"
+
+          aws ecs describe-task-definition \
+            --task-definition "$BACKEND_TASK_FAMILY" \
+            --query taskDefinition \
+            --output json \
+            > "$RUNNER_TEMP/backend-task-definition-raw.json"
+
+          # Remove AWS-generated fields before registering new revisions.
+          jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+            "$RUNNER_TEMP/frontend-task-definition-raw.json" \
+            > "$RUNNER_TEMP/frontend-task-definition.json"
+
+          jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+            "$RUNNER_TEMP/backend-task-definition-raw.json" \
+            > "$RUNNER_TEMP/backend-task-definition.json"
+
+      # 7. Update frontend container image
+      - name: Render Frontend Task Definition
+        id: render-frontend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1.9.1
+        with:
+          task-definition: ${{ runner.temp }}/frontend-task-definition.json
+          container-name: frontend
+          image: ${{ steps.build-images.outputs.frontend_image }}
+
+      # 8. Update backend container image
+      - name: Render Backend Task Definition
+        id: render-backend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1.9.1
+        with:
+          task-definition: ${{ runner.temp }}/backend-task-definition.json
+          container-name: backend
+          image: ${{ steps.build-images.outputs.backend_image }}
+
+      # 9. Deploy backend first
+      - name: Deploy Backend to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2.6.4
+        with:
+          task-definition: ${{ steps.render-backend.outputs.task-definition }}
+          service: ${{ env.BACKEND_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+          wait-for-minutes: 15
+
+      # 10. Deploy frontend
+      - name: Deploy Frontend to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2.6.4
+        with:
+          task-definition: ${{ steps.render-frontend.outputs.task-definition }}
+          service: ${{ env.FRONTEND_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+          wait-for-minutes: 15
+
+      # 11. Verify deployed application
+      - name: Verify Application
+        run: |
+          set -euo pipefail
+
+          echo "Checking frontend..."
+          curl --fail --silent --show-error \
+            --retry 12 --retry-delay 5 --retry-connrefused \
+            "$APPLICATION_URL/" \
+            --output /dev/null
+
+          echo "Checking cake API..."
+          curl --fail --silent --show-error \
+            --retry 12 --retry-delay 5 --retry-connrefused \
+            "$APPLICATION_URL/api/cakes" \
+            --output "$RUNNER_TEMP/cakes.json"
+
+          jq -e 'length == 6' "$RUNNER_TEMP/cakes.json" > /dev/null
+
+          echo "Deployment verification successful."
+          echo "Six cakes were returned by the API."
