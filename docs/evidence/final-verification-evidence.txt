@@ -1,0 +1,41 @@
+﻿# Final Capstone Verification Evidence
+
+Date: 25 November 2026
+Repository: HiteshGupta03/infra-as-code-pipeline
+Branch: main
+
+## Pull Request
+Pull Request: #3
+Status: Merged
+Merge commit: eb6513e251d281dd25170c6954ad32895eb82e65
+Commits merged: 10
+URL: https://github.com/HiteshGupta03/infra-as-code-pipeline/pull/3
+
+## Continuous Integration
+Workflow: Continuous Integration
+Run: #22
+Run ID: 45648473140
+Result: SUCCESS
+Backend tests, frontend build, Terraform quality checks and Docker builds: SUCCESS
+
+## Staging Deployment
+Workflow: Deploy to Staging
+Run: #5
+Run ID: 45648473053
+Attempt: 2
+Result: SUCCESS
+Backend and frontend deployment, database migration and application verification: SUCCESS
+Cake API verification: Six records returned
+
+## Production Safety
+Workflow: Deploy to Production
+Run: #1
+Run ID: 45652034474
+Quality checks: SUCCESS
+Production ECS deployment job: SKIPPED by deployment safety guard
+Production AWS infrastructure: Not provisioned
+Production application deployment: Not performed
+
+## Remaining Validation
+Rollback logic is implemented, but recovery time has not been measured against the 60-second requirement.
+Development and staging remain the validated deployment environments.
