@@ -88,24 +88,50 @@ jobs:
           echo "frontend_image=$FRONTEND_IMAGE" >> "$GITHUB_OUTPUT"
           echo "backend_image=$BACKEND_IMAGE" >> "$GITHUB_OUTPUT"
 
-      # 6. Download current ECS task definitions
-      - name: Download ECS Task Definitions
+
+      # 6. Capture current task definitions for rollback
+      - name: Capture Previous ECS Task Definitions
+        id: capture-previous-task-definitions
         run: |
           set -euo pipefail
 
+          FRONTEND_PREVIOUS_TASK_DEFINITION="$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$FRONTEND_SERVICE" \
+            --query 'services[0].taskDefinition' \
+            --output text)"
+
+          BACKEND_PREVIOUS_TASK_DEFINITION="$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$BACKEND_SERVICE" \
+            --query 'services[0].taskDefinition' \
+            --output text)"
+
+          if [[ -z "$FRONTEND_PREVIOUS_TASK_DEFINITION" || "$FRONTEND_PREVIOUS_TASK_DEFINITION" == "None" ]]; then
+            echo "Could not retrieve previous frontend task definition."
+            exit 1
+          fi
+
+          if [[ -z "$BACKEND_PREVIOUS_TASK_DEFINITION" || "$BACKEND_PREVIOUS_TASK_DEFINITION" == "None" ]]; then
+            echo "Could not retrieve previous backend task definition."
+            exit 1
+          fi
+
+          echo "frontend_previous_task_definition=$FRONTEND_PREVIOUS_TASK_DEFINITION" >> "$GITHUB_OUTPUT"
+          echo "backend_previous_task_definition=$BACKEND_PREVIOUS_TASK_DEFINITION" >> "$GITHUB_OUTPUT"
+
           aws ecs describe-task-definition \
-            --task-definition "$FRONTEND_TASK_FAMILY" \
+            --task-definition "$FRONTEND_PREVIOUS_TASK_DEFINITION" \
             --query taskDefinition \
             --output json \
             > "$RUNNER_TEMP/frontend-task-definition-raw.json"
 
           aws ecs describe-task-definition \
-            --task-definition "$BACKEND_TASK_FAMILY" \
+            --task-definition "$BACKEND_PREVIOUS_TASK_DEFINITION" \
             --query taskDefinition \
             --output json \
             > "$RUNNER_TEMP/backend-task-definition-raw.json"
 
-          # Remove AWS-generated fields before registering new revisions.
           jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
             "$RUNNER_TEMP/frontend-task-definition-raw.json" \
             > "$RUNNER_TEMP/frontend-task-definition.json"
@@ -113,6 +139,9 @@ jobs:
           jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
             "$RUNNER_TEMP/backend-task-definition-raw.json" \
             > "$RUNNER_TEMP/backend-task-definition.json"
+
+          echo "Previous frontend and backend task definitions captured."
+
 
       # 7. Update frontend container image
       - name: Render Frontend Task Definition
@@ -132,17 +161,164 @@ jobs:
           container-name: backend
           image: ${{ steps.build-images.outputs.backend_image }}
 
-      # 9. Deploy backend first
-      - name: Deploy Backend to ECS
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2.6.4
-        with:
-          task-definition: ${{ steps.render-backend.outputs.task-definition }}
-          service: ${{ env.BACKEND_SERVICE }}
-          cluster: ${{ env.ECS_CLUSTER }}
-          wait-for-service-stability: true
-          wait-for-minutes: 15
 
-      # 10. Deploy frontend
+      # 9. Register backend task definition for migration
+      - name: Register Backend Task Definition for Migration
+        id: register-backend-for-migration
+        env:
+          TASK_DEFINITION_FILE: ${{ steps.render-backend.outputs.task-definition }}
+        run: |
+          set -euo pipefail
+
+          TASK_DEFINITION_ARN="$(aws ecs register-task-definition \
+            --cli-input-json "file://${TASK_DEFINITION_FILE}" \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)"
+
+          if [[ -z "$TASK_DEFINITION_ARN" || "$TASK_DEFINITION_ARN" == "None" ]]; then
+            echo "Backend task definition registration failed."
+            exit 1
+          fi
+
+          echo "task_definition_arn=$TASK_DEFINITION_ARN" >> "$GITHUB_OUTPUT"
+
+      # 10. Run database migration as a standalone ECS task
+      - name: Run Database Migration
+        env:
+          BACKEND_TASK_DEFINITION_ARN: ${{ steps.register-backend-for-migration.outputs.task_definition_arn }}
+        run: |
+          set -euo pipefail
+
+          echo "Retrieving backend ECS networking configuration..."
+
+          aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$BACKEND_SERVICE" \
+            --query 'services[0].networkConfiguration' \
+            --output json > "$RUNNER_TEMP/migration-network.json"
+
+          jq -e '.awsvpcConfiguration.subnets | length > 0' \
+            "$RUNNER_TEMP/migration-network.json" > /dev/null
+
+          jq -e '.awsvpcConfiguration.securityGroups | length > 0' \
+            "$RUNNER_TEMP/migration-network.json" > /dev/null
+
+          echo "Preparing migration command..."
+
+          jq -n '{
+            containerOverrides: [
+              {
+                name: "backend",
+                command: ["node", "migrate.js"]
+              }
+            ]
+          }' > "$RUNNER_TEMP/migration-overrides.json"
+
+          echo "Starting ECS migration task..."
+
+          aws ecs run-task \
+            --cluster "$ECS_CLUSTER" \
+            --task-definition "$BACKEND_TASK_DEFINITION_ARN" \
+            --launch-type FARGATE \
+            --network-configuration "file://$RUNNER_TEMP/migration-network.json" \
+            --overrides "file://$RUNNER_TEMP/migration-overrides.json" \
+            --client-token "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --output json > "$RUNNER_TEMP/migration-run.json"
+
+          if [[ "$(jq '(.failures // []) | length' "$RUNNER_TEMP/migration-run.json")" -gt 0 ]]; then
+            jq '.failures' "$RUNNER_TEMP/migration-run.json"
+            echo "ECS could not start the migration task."
+            exit 1
+          fi
+
+          TASK_ARN="$(jq -r '.tasks[0].taskArn // empty' "$RUNNER_TEMP/migration-run.json")"
+
+          if [[ -z "$TASK_ARN" || "$TASK_ARN" == "None" ]]; then
+            echo "Migration task ARN was not returned."
+            exit 1
+          fi
+
+          echo "Migration task started: $TASK_ARN"
+
+          if ! aws ecs wait tasks-stopped \
+            --cluster "$ECS_CLUSTER" \
+            --tasks "$TASK_ARN"; then
+
+            aws ecs describe-tasks \
+              --cluster "$ECS_CLUSTER" \
+              --tasks "$TASK_ARN" \
+              --output json > "$RUNNER_TEMP/migration-result.json"
+
+            jq '.tasks[0] | {lastStatus, stopCode, stoppedReason}' \
+              "$RUNNER_TEMP/migration-result.json"
+
+            echo "Migration task did not stop successfully."
+            exit 1
+          fi
+
+          aws ecs describe-tasks \
+            --cluster "$ECS_CLUSTER" \
+            --tasks "$TASK_ARN" \
+            --output json > "$RUNNER_TEMP/migration-result.json"
+
+          TASK_STATUS="$(jq -r '.tasks[0].lastStatus // empty' "$RUNNER_TEMP/migration-result.json")"
+
+          TASK_EXIT_CODE="$(jq -r '[.tasks[0].containers[]? | select(.name == "backend") | .exitCode][0] // empty' "$RUNNER_TEMP/migration-result.json")"
+
+          if [[ "$TASK_STATUS" != "STOPPED" || "$TASK_EXIT_CODE" != "0" ]]; then
+            jq '{
+              lastStatus: .tasks[0].lastStatus,
+              stopCode: .tasks[0].stopCode,
+              stoppedReason: .tasks[0].stoppedReason,
+              containers: [.tasks[0].containers[]? | {name, lastStatus, exitCode, reason}]
+            }' "$RUNNER_TEMP/migration-result.json"
+
+            echo "Database migration failed. Backend deployment will not continue."
+            exit 1
+          fi
+
+          echo "Database migration completed successfully."
+
+
+
+      # 11. Deploy the registered backend task definition
+      - name: Deploy Backend to ECS
+        id: deploy-backend
+        env:
+          BACKEND_TASK_DEFINITION_ARN: ${{ steps.register-backend-for-migration.outputs.task_definition_arn }}
+        run: |
+          set -euo pipefail
+
+          echo "deployment_started=true" >> "$GITHUB_OUTPUT"
+
+          echo "Deploying backend..."
+
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$BACKEND_SERVICE" \
+            --task-definition "$BACKEND_TASK_DEFINITION_ARN" \
+            --output json > "$RUNNER_TEMP/backend-service-update.json"
+
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$BACKEND_SERVICE"
+
+          DEPLOYED_TASK_DEFINITION="$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$BACKEND_SERVICE" \
+            --query 'services[0].taskDefinition' \
+            --output text)"
+
+          if [[ "$DEPLOYED_TASK_DEFINITION" != "$BACKEND_TASK_DEFINITION_ARN" ]]; then
+            echo "The backend deployment did not retain the requested task definition."
+            echo "ECS may have rolled back to the previous revision."
+            exit 1
+          fi
+
+          echo "Backend deployment successful."
+
+
+      # 12. Deploy frontend
       - name: Deploy Frontend to ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2.6.4
         with:
@@ -152,7 +328,7 @@ jobs:
           wait-for-service-stability: true
           wait-for-minutes: 15
 
-      # 11. Verify deployed application
+      # 13. Verify deployed application
       - name: Verify Application
         run: |
           set -euo pipefail
@@ -173,3 +349,68 @@ jobs:
 
           echo "Deployment verification successful."
           echo "Six cakes were returned by the API."
+
+
+      # 14. Roll back failed deployments
+      - name: Roll Back ECS Deployment
+        if: ${{ failure() && steps.deploy-backend.outputs.deployment_started == 'true' }}
+        env:
+          PREVIOUS_BACKEND_TASK_DEFINITION: ${{ steps.capture-previous-task-definitions.outputs.backend_previous_task_definition }}
+          PREVIOUS_FRONTEND_TASK_DEFINITION: ${{ steps.capture-previous-task-definitions.outputs.frontend_previous_task_definition }}
+        run: |
+          set -uo pipefail
+
+          ROLLBACK_FAILED=0
+
+          echo "Deployment failed. Starting ECS rollback..."
+
+          # Restore backend
+          echo "Rolling back backend..."
+
+          if [[ -z "$PREVIOUS_BACKEND_TASK_DEFINITION" || "$PREVIOUS_BACKEND_TASK_DEFINITION" == "None" ]]; then
+            echo "Previous backend task definition is missing."
+            ROLLBACK_FAILED=1
+          elif aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$BACKEND_SERVICE" \
+            --task-definition "$PREVIOUS_BACKEND_TASK_DEFINITION"; then
+
+            if ! aws ecs wait services-stable \
+              --cluster "$ECS_CLUSTER" \
+              --services "$BACKEND_SERVICE"; then
+              echo "Backend rollback did not reach stability."
+              ROLLBACK_FAILED=1
+            fi
+          else
+            echo "Backend rollback update failed."
+            ROLLBACK_FAILED=1
+          fi
+
+          # Restore frontend
+          echo "Rolling back frontend..."
+
+          if [[ -z "$PREVIOUS_FRONTEND_TASK_DEFINITION" || "$PREVIOUS_FRONTEND_TASK_DEFINITION" == "None" ]]; then
+            echo "Previous frontend task definition is missing."
+            ROLLBACK_FAILED=1
+          elif aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$FRONTEND_SERVICE" \
+            --task-definition "$PREVIOUS_FRONTEND_TASK_DEFINITION"; then
+
+            if ! aws ecs wait services-stable \
+              --cluster "$ECS_CLUSTER" \
+              --services "$FRONTEND_SERVICE"; then
+              echo "Frontend rollback did not reach stability."
+              ROLLBACK_FAILED=1
+            fi
+          else
+            echo "Frontend rollback update failed."
+            ROLLBACK_FAILED=1
+          fi
+
+          if [[ "$ROLLBACK_FAILED" -ne 0 ]]; then
+            echo "Rollback was not completely successful. Manual investigation is required."
+            exit 1
+          fi
+
+          echo "Both ECS services have been rolled back successfully."

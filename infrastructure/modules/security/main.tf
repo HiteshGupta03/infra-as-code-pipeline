@@ -270,6 +270,36 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         }
       },
       {
+        Sid    = "RunBackendMigrationTask"
+        Effect = "Allow"
+        Action = ["ecs:RunTask"]
+
+        Resource = [
+          "arn:${data.aws_partition.current.partition}:ecs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:task-definition/${var.project_name}-${var.environment}-backend:*"
+        ]
+
+        Condition = {
+          ArnEquals = {
+            "ecs:cluster" = "arn:${data.aws_partition.current.partition}:ecs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:cluster/${var.project_name}-${var.environment}-cluster"
+          }
+        }
+      },
+      {
+        Sid    = "DescribeBackendMigrationTasks"
+        Effect = "Allow"
+        Action = ["ecs:DescribeTasks"]
+
+        Resource = [
+          "arn:${data.aws_partition.current.partition}:ecs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:task/${var.project_name}-${var.environment}-cluster/*"
+        ]
+
+        Condition = {
+          ArnEquals = {
+            "ecs:cluster" = "arn:${data.aws_partition.current.partition}:ecs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:cluster/${var.project_name}-${var.environment}-cluster"
+          }
+        }
+      },
+      {
         Sid    = "DeployProjectECSServices"
         Effect = "Allow"
 
