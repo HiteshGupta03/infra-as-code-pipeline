@@ -1,0 +1,13 @@
+DEV DATABASE MIGRATION EVIDENCE
+============================
+Date: 2026-11-25 15:35:27 +05:30
+AWS Region: ap-south-1
+ECS Cluster: infra-as-code-pipeline-dev-cluster
+Migration Task: 08e6fb07028b4e76bdb53e77e8e4c71e
+Task Status: STOPPED
+Container Exit Code: 0
+CloudWatch Log Group: /ecs/infra-as-code-pipeline-dev/backend
+CloudWatch Log Stream: ecs/backend/08e6fb07028b4e76bdb53e77e8e4c71e
+Migration Result: DATABASE MIGRATION SUCCESSFUL
+Cake Records Present: 6
+GitHub Actions Run: https://github.com/HiteshGupta03/infra-as-code-pipeline/actions/runs/45587341701

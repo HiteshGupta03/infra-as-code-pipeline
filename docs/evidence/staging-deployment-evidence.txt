@@ -1,0 +1,32 @@
+﻿# Staging Deployment Evidence
+
+Date: 25 November 2026
+Repository: HiteshGupta03/infra-as-code-pipeline
+Branch: feature/terraform-bootstrap
+Pull Request: #3
+Commit: 82d4fc8
+
+## GitHub Actions
+Workflow: Deploy to Staging
+Run: #1
+Run ID: 45603335209
+Result: SUCCESS
+
+URL: https://github.com/HiteshGupta03/infra-as-code-pipeline/actions/runs/45603335209
+
+## Deployment Results
+- AWS OIDC authentication: Successful
+- Staging ECR image builds and pushes: Successful
+- Database migration: Successful
+- Migration ECS task: STOPPED with successful container exit-code validation
+- Backend ECS deployment: Stable
+- Frontend ECS deployment: Rollout COMPLETED
+- Homepage HTTP verification: Successful
+- API verification: Six cake records returned
+- Rollback: Skipped because deployment succeeded
+
+## Migration Task
+arn:aws:ecs:ap-south-1:597692077614:task/infra-as-code-pipeline-staging-cluster/e135f76497724988bb8488cf64a36b7f
+
+## Application URL
+http://infra-as-code-pipeline-staging-a-1370405151.ap-south-1.elb.amazonaws.com
