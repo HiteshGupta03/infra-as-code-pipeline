@@ -1,4 +1,4 @@
-﻿# CI/CD Pipeline Flow
+# CI/CD Pipeline Flow
 
 ## 1. Overview
 
@@ -24,7 +24,9 @@ flowchart TD
     CHOICE -->|Merge / Push to main| PROD["Production Deployment"]
     DEVDEP --> ECRDEV["Build and Push Dev Images to ECR"]
     STAGE --> ECRSTAGE["Build and Push Staging Images to ECR"]
-    PROD --> APPROVAL["GitHub Production Environment Approval"]
+    PROD --> GATE{"ENABLE_PRODUCTION_DEPLOYMENT == true?"}
+    GATE -->|Yes| APPROVAL["GitHub Production Environment Approval"]
+    GATE -->|No| SKIP["Production deployment skipped"]
     APPROVAL --> ECRPROD["Build and Push Production Images to ECR"]
     ECRDEV --> MIGRATE["Run ECS Database Migration"]
     ECRSTAGE --> MIGRATE
@@ -65,11 +67,11 @@ flowchart TD
 - GitHub Actions authenticates to AWS using OIDC.
 - Separate IAM deployment roles are configured for dev, staging and production.
 - JWT and database passwords are retrieved through AWS secret services.
-- Production uses the GitHub `production` Environment with required reviewer approval.
+- Production uses the GitHub `production` Environment with required reviewer approval.`r`n- The deployment job also requires repository variable `ENABLE_PRODUCTION_DEPLOYMENT` to equal `true`. Keep it unset until production resources are ready.
 
 ## 6. Current Implementation Status
 
 - Development deployment: Implemented and tested.
 - Staging deployment: Implemented and successfully tested.
-- Production workflow and approval protection: Configured; production AWS infrastructure is not provisioned.
+- Production workflow guard and approval protection: Configured; deployment disabled until production infrastructure is provisioned.
 - Rollback workflow: Implemented; rollback recovery time has not yet been measured.

@@ -1,4 +1,4 @@
-﻿# MbeautyCakes – DevOps Capstone
+# MbeautyCakes – DevOps Capstone
 
 A full-stack cake delivery application deployed on AWS using Terraform, Amazon ECS Fargate, Amazon ECR, Application Load Balancer, Amazon RDS and GitHub Actions CI/CD.
 
@@ -83,7 +83,9 @@ flowchart TD
     ROUTE -->|Manual dispatch| DEVDEP["Development Deployment"]
     ROUTE -->|Pull Request to main| STAGE["Staging Deployment"]
     ROUTE -->|Push to main| PROD["Production Deployment"]
-    PROD --> APPROVE["Production Environment Approval"]
+    PROD --> PRODGUARD{"ENABLE_PRODUCTION_DEPLOYMENT == true?"}
+    PRODGUARD -->|Yes| APPROVE["Production Environment Approval"]
+    PRODGUARD -->|No| DISABLED["Production deployment skipped"]
     APPROVE --> MIGRATE["Run Database Migration"]
     DEVDEP --> MIGRATE
     STAGE --> MIGRATE
@@ -178,7 +180,7 @@ For staging, select the `staging` workspace and use `environments/staging.tfvars
 
 - **Development:** Open Actions, select the development deployment workflow, use the `feature/terraform-bootstrap` branch and set the confirmation input to `yes`.
 - **Staging:** Open a non-draft Pull Request targeting `main`. The staging workflow runs quality checks and deploys after they pass.
-- **Production:** The production workflow is configured for `main` with a required GitHub Environment reviewer approval. Production AWS infrastructure has not yet been provisioned, so production deployment is not ready to run.
+- **Production:** Deployment requires the repository variable `ENABLE_PRODUCTION_DEPLOYMENT` to equal `true`, followed by GitHub production Environment reviewer approval. Keep the variable unset until production IAM, ECS, ECR and the application URL are provisioned and verified.
 
 ## Deployment Runbook
 
@@ -224,7 +226,7 @@ See the detailed assumptions and calculation: [AWS Monthly Cost Estimate](docs/a
 | CloudWatch log groups | Implemented |
 | Development deployment | Deployed and tested |
 | Staging deployment | Deployed and tested |
-| Production workflow and approval gate | Configured; production infrastructure not provisioned |
+| Production deployment guard and approval gate | Configured; deployment disabled pending production infrastructure |
 | Automated deployment recovery | Implemented; recovery time not yet measured |
 
 ## Security Practices

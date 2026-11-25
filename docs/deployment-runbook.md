@@ -1,4 +1,4 @@
-# Deployment Runbook – MbeautyCakes
+# Deployment Runbook â€“ MbeautyCakes
 
 ## 1. Purpose
 
@@ -67,8 +67,8 @@ For staging, select the staging workspace and use its variable file. Do not appl
 
 ### Production
 
-Production infrastructure is not provisioned yet. The workflow is configured to run on a push to main or manual dispatch from main. The GitHub production Environment requires reviewer approval.
-Before enabling deployment, provision and verify the production IAM role, ECS cluster, services, ECR repositories and application URL. Configure PRODUCTION_APPLICATION_URL in the production GitHub Environment. Do not trigger deployment while these prerequisites are missing.
+Production infrastructure is not provisioned yet. The deployment job requires repository variable `ENABLE_PRODUCTION_DEPLOYMENT` to equal `true`. With this variable unset, main pushes will not start the production deployment job. The GitHub production Environment also requires reviewer approval.
+Before enabling deployment, provision and verify the production IAM role, ECS cluster, services, ECR repositories and application URL. Configure `PRODUCTION_APPLICATION_URL` in the production GitHub Environment. Only after these prerequisites are verified, set the repository variable `ENABLE_PRODUCTION_DEPLOYMENT` to `true`. For a manual deployment, dispatch from `main` with `confirm_deploy` set to `yes`.
 
 ## 6. Deployment Verification
 

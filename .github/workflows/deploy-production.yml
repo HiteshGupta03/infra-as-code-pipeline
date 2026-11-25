@@ -35,11 +35,11 @@ jobs:
     name: Build and deploy to production ECS
     needs: quality
     if: >-
-      (github.event_name == 'push' &&
+      vars.ENABLE_PRODUCTION_DEPLOYMENT == 'true' && ((github.event_name == 'push' &&
        github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' &&
        github.ref == 'refs/heads/main' &&
-       github.event.inputs.confirm_deploy == 'yes')
+       github.event.inputs.confirm_deploy == 'yes'))
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 45
