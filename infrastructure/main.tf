@@ -1,8 +1,11 @@
+locals {
+  environment = terraform.workspace
+}
 module "networking" {
   source = "./modules/networking"
 
   project_name = var.project_name
-  environment  = var.environment
+  environment  = local.environment
   vpc_cidr     = var.vpc_cidr
 }
 
@@ -10,7 +13,7 @@ module "security" {
   source = "./modules/security"
 
   project_name = var.project_name
-  environment  = var.environment
+  environment  = local.environment
 
   vpc_id = module.networking.vpc_id
 
@@ -22,14 +25,14 @@ module "registry" {
   source = "./modules/registry"
 
   project_name = var.project_name
-  environment  = var.environment
+  environment  = local.environment
 }
 
 module "compute" {
   source = "./modules/compute"
 
   project_name = var.project_name
-  environment  = var.environment
+  environment  = local.environment
   aws_region   = var.aws_region
 
   # Networking
@@ -78,7 +81,7 @@ module "monitoring" {
   source = "./modules/monitoring"
 
   project_name       = var.project_name
-  environment        = var.environment
+  environment        = local.environment
   log_retention_days = var.log_retention_days
 }
 
@@ -86,7 +89,7 @@ module "database" {
   source = "./modules/database"
 
   project_name = var.project_name
-  environment  = var.environment
+  environment  = local.environment
 
   database_name     = var.database_name
   database_username = var.database_username
@@ -101,7 +104,7 @@ module "database" {
 
 # ECS Task Execution Role - Secret Access
 resource "aws_iam_role_policy" "ecs_task_execution_secrets" {
-  name = "${var.project_name}-${var.environment}-ecs-secrets"
+  name = "${var.project_name}-${local.environment}-ecs-secrets"
   role = module.security.task_execution_role_name
 
   policy = jsonencode({
