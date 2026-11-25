@@ -1,418 +1,253 @@
-# 🍰 MbeautyCakes
+﻿# MbeautyCakes – DevOps Capstone
 
-A full-stack cake delivery web application built with React, Node.js, Express, MySQL, Docker, Nginx, and AWS.
+A full-stack cake delivery application deployed on AWS using Terraform, Amazon ECS Fargate, Amazon ECR, Application Load Balancer, Amazon RDS and GitHub Actions CI/CD.
 
-MbeautyCakes allows customers to browse cakes, choose cake weights, manage their cart, place orders, track orders, and manage their profile.
+## Project Overview
 
----
+MbeautyCakes allows customers to browse cakes, select cake weights, manage carts, place orders and track their orders. This capstone demonstrates infrastructure as code, containerization, automated testing, cloud deployment, monitoring and deployment recovery.
 
-## 🚀 Features
+### Technology Stack
 
-### Customer Features
+- Frontend: React, Vite, Nginx
+- Backend: Node.js, Express.js, REST API
+- Database: MySQL on Amazon RDS
+- Containers: Docker and Amazon ECS Fargate
+- Infrastructure as Code: Terraform
+- Container Registry: Amazon ECR
+- CI/CD: GitHub Actions
+- Cloud Services: VPC, IAM, ALB, RDS, SSM Parameter Store, Secrets Manager and CloudWatch
 
-- Browse available cakes
-- Filter cakes by category
-- Select cake weight:
-  - 250g
-  - 500g
-  - 1Kg
-- Dynamic pricing based on selected weight
-- Add cakes to cart
-- Increase/decrease cart quantity
-- Remove items from cart
-- User registration and login
-- Profile section
-- Checkout and delivery details
-- Place orders
-- View previous orders
-- Track order status
+## Architecture Diagram
 
-### Admin Features
+The application runs in an AWS VPC in the Mumbai region (`ap-south-1`). The Application Load Balancer routes normal web requests to the frontend and `/api/*` requests to the backend. The RDS database is deployed in private subnets. ECS frontend and backend tasks use public subnets in the current Terraform configuration.
 
-- Admin authentication
-- View customer orders
-- View order details
-- Update order status
-- Order tracking workflow
-
----
-
-## 🛠️ Tech Stack
-
-### Frontend
-
-- React
-- React Router
-- Vite
-- CSS
-
-### Backend
-
-- Node.js
-- Express.js
-- JWT Authentication
-- REST API
-
-### Database
-
-- MySQL 8.0
-
-### DevOps / Deployment
-
-- Docker
-- Docker Compose
-- Nginx
-- Git
-- GitHub
-- AWS EC2
-
----
-
-## 🏗️ Architecture
-
-```text
-                        Internet
-                           │
-                           ▼
-                 ┌──────────────────┐
-                 │      Nginx       │
-                 │ React Frontend   │
-                 │      :80         │
-                 └────────┬─────────┘
-                          │
-                       /api/*
-                          │
-                          ▼
-                 ┌──────────────────┐
-                 │     Backend      │
-                 │ Node + Express   │
-                 │      :5000       │
-                 └────────┬─────────┘
-                          │
-                          ▼
-                 ┌──────────────────┐
-                 │      MySQL       │
-                 │      :3306       │
-                 └────────┬─────────┘
-                          │
-                          ▼
-                 ┌──────────────────┐
-                 │ Docker Volume    │
-                 │ Persistent Data  │
-                 └──────────────────┘
+```mermaid
+flowchart TB
+    USER["Users / Internet"] --> ALB["Application Load Balancer<br/>HTTP :80"]
+    subgraph VPC["AWS VPC"]
+        subgraph PUBLIC["Public Subnets"]
+            ALB
+            subgraph ECS["Amazon ECS Fargate"]
+                FE["Frontend Tasks<br/>React + Nginx"]
+                BE["Backend Tasks<br/>Node.js + Express"]
+            end
+        end
+        subgraph PRIVATE["Private Subnets"]
+            DB[("Amazon RDS<br/>MySQL")]
+        end
+    end
+    ALB -->|Default route /| FE
+    ALB -->|Path /api/*| BE
+    BE -->|MySQL :3306| DB
+    ECR["Amazon ECR<br/>Container Images"] --> FE
+    ECR --> BE
+    FE --> CW["Amazon CloudWatch<br/>Container Logs"]
+    BE --> CW
+    SSM["SSM Parameter Store<br/>JWT Secret"] --> BE
+    SM["AWS Secrets Manager<br/>Database Password"] --> BE
 ```
 
-## 🐳 Docker Architecture
+### Main Infrastructure Components
 
-The application is divided into three main containers:
+| Component | Purpose |
+|---|---|
+| Amazon VPC | Isolated AWS network with public and private subnets |
+| Application Load Balancer | Routes frontend and API traffic |
+| ECS Fargate | Runs frontend and backend containers |
+| Amazon ECR | Stores frontend and backend Docker images |
+| Amazon RDS MySQL | Stores application data in private subnets |
+| IAM and OIDC | Grants GitHub Actions controlled AWS access |
+| SSM Parameter Store | Stores the JWT secret |
+| AWS Secrets Manager | Manages the RDS database password |
+| CloudWatch | Stores container logs and monitoring data |
+| S3 remote backend | Stores Terraform state remotely |
+| Terraform state locking | Uses the configured S3 lockfile and DynamoDB table |
 
-```text
-mbeautycakes-frontend
-        │
-        │ Nginx
-        ▼
-mbeautycakes-backend
-        │
-        ▼
-mbeautycakes-mysql
+## CI/CD Pipeline Flow
+
+GitHub Actions performs code quality checks, builds Docker images, pushes images to ECR and deploys the application to ECS.
+
+```mermaid
+flowchart TD
+    DEV["Developer"] --> PUSH["Push branch / Open Pull Request"]
+    PUSH --> CI["GitHub Actions CI"]
+    CI --> TEST["Backend Tests and Security Audit"]
+    CI --> FRONT["Frontend Lint and Build"]
+    CI --> TF["Terraform Format, Validate and TFLint"]
+    TEST --> BUILD["Docker Build Verification"]
+    FRONT --> BUILD
+    TF --> BUILD
+    BUILD --> PASS{"Checks passed?"}
+    PASS -->|No| FAIL["Stop and report failure"]
+    PASS -->|Yes| ROUTE{"Deployment path"}
+    ROUTE -->|Manual dispatch| DEVDEP["Development Deployment"]
+    ROUTE -->|Pull Request to main| STAGE["Staging Deployment"]
+    ROUTE -->|Push to main| PROD["Production Deployment"]
+    PROD --> APPROVE["Production Environment Approval"]
+    APPROVE --> MIGRATE["Run Database Migration"]
+    DEVDEP --> MIGRATE
+    STAGE --> MIGRATE
+    MIGRATE --> SUCCESSM{"Migration successful?"}
+    SUCCESSM -->|No| STOP["Stop deployment"]
+    SUCCESSM -->|Yes| DEPLOY["Deploy Frontend and Backend to ECS"]
+    DEPLOY --> VERIFY["Wait for Stability and Verify Application"]
+    VERIFY --> HEALTH{"Health checks passed?"}
+    HEALTH -->|Yes| DONE["Deployment Successful"]
+    HEALTH -->|No| ROLLBACK["Attempt Previous Task Definition Recovery"]
 ```
 
-Docker Compose provides:
+### GitHub Actions Workflow Files
 
-- Service networking
-- Container orchestration
-- Persistent MySQL volume
-- Container health checks
-- Automatic restart policies
+| Workflow | Trigger | Purpose |
+|---|---|---|
+| `ci.yml` | Push, Pull Request, Manual or Reusable | Tests, lint, Terraform checks and Docker build verification |
+| `deploy.yml` | Manual dispatch | Development deployment |
+| `deploy-staging.yml` | Pull Request to main or Manual dispatch | Staging deployment |
+| `deploy-production.yml` | Push to main or Manual dispatch | Production deployment with approval protection |
 
+### Deployment Process
 
-## 📁 Project Structure
+1. Run backend tests, frontend lint/build and Terraform quality checks.
+2. Build frontend and backend Docker images.
+3. Push environment-specific images to Amazon ECR.
+4. Capture the previous ECS task definition revisions.
+5. Run the database migration as a standalone ECS task.
+6. Deploy frontend and backend services to ECS Fargate.
+7. Wait for ECS service stability and verify the homepage and cake API.
+8. On a post-deployment failure, attempt to restore the previous task definitions.
 
-```text
-mbeautycakes/
-│
-├── backend/
-│   ├── Dockerfile
-│   ├── .dockerignore
-│   ├── package.json
-│   ├── server.js
-│   └── db.js
-│
-├── frontend/
-│   ├── Dockerfile
-│   ├── .dockerignore
-│   ├── nginx.conf
-│   ├── package.json
-│   ├── vite.config.js
-│   └── src/
-│       ├── components/
-│       ├── App.jsx
-│       ├── App.css
-│       └── main.jsx
-│
-├── database/
-│   └── schema.sql
-│
-├── docker-compose.yml
-├── .gitignore
-└── README.md
-```
-
-
-## ▶️ Run the Project Locally
+## Setup Instructions
 
 ### Prerequisites
 
-Make sure the following are installed:
+Install the following tools:
 
 - Git
-- Docker Desktop
-- Docker Compose
+- Docker Desktop with Docker Compose
+- Node.js and npm (for development and tests)
+- Terraform 1.10 or newer
+- AWS CLI
+- An AWS account with the required permissions
 
+### Clone the Repository
 
-### Clone the repository
-
-```bash
-git clone https://github.com/HiteshGupta03/mbeautycakes.git
+```powershell
+git clone https://github.com/HiteshGupta03/infra-as-code-pipeline.git
+cd infra-as-code-pipeline
 ```
 
-Move into the project:
+### Run the Application Locally
 
-```bash
-cd mbeautycakes
-```
+Configure the application environment variables locally. Do not commit `.env` files, credentials or secrets.
 
-
-## ⚙️ Environment Variables
-
-Create the required environment file locally:
-
-```text
-backend/.env
-```
-
-Do not commit `.env` files to GitHub.
-
-Sensitive values such as passwords and JWT secrets should remain private.
-
-
-## 🐳 Run with Docker Compose
-
-From the project root:
-
-```bash
+```powershell
 docker compose up -d --build
-```
-
-Check running containers:
-
-```bash
 docker compose ps
 ```
 
-Expected services:
+Open the application at `http://localhost`. The API endpoint is `http://localhost/api/cakes`.
 
-```text
-mbeautycakes-frontend
-mbeautycakes-backend
-mbeautycakes-mysql
-```
+To inspect logs and stop the local application:
 
-
-## 🌐 Access the Application
-
-Open:
-
-```text
-http://localhost
-```
-
-Backend API:
-
-```text
-http://localhost/api/cakes
-```
-
-
-## 🔍 Useful Docker Commands
-
-### Check containers
-
-```bash
-docker compose ps
-```
-
-### View all logs
-
-```bash
+```powershell
 docker compose logs
-```
-
-### Backend logs
-
-```bash
-docker compose logs backend
-```
-
-### Frontend logs
-
-```bash
-docker compose logs frontend
-```
-
-### MySQL logs
-
-```bash
-docker compose logs mysql
-```
-
-### Stop the application
-
-```bash
 docker compose down
 ```
 
-### Rebuild containers
+### Provision AWS Infrastructure with Terraform
 
-```bash
-docker compose up -d --build
+The Terraform configuration is inside the `infrastructure` directory. The remote S3 backend and required state-locking resources must exist before initialization. Create account-specific environment variable files locally; these files are excluded from Git and must not contain committed secrets.
+
+```powershell
+cd infrastructure
+terraform init
+terraform workspace list
+terraform workspace select dev
+terraform plan -var-file=environments/dev.tfvars
 ```
 
-### Check Docker images
+Review the plan before applying infrastructure changes:
 
-```bash
-docker images
+```powershell
+terraform apply -var-file=environments/dev.tfvars
 ```
 
+For staging, select the `staging` workspace and use `environments/staging.tfvars`. Review account restrictions and cost implications before provisioning production. Do not commit Terraform state files or secret variable files.
 
-## 💾 Database Persistence
+### Deploy Through GitHub Actions
 
-MySQL data is stored in a Docker named volume:
+- **Development:** Open Actions, select the development deployment workflow, use the `feature/terraform-bootstrap` branch and set the confirmation input to `yes`.
+- **Staging:** Open a non-draft Pull Request targeting `main`. The staging workflow runs quality checks and deploys after they pass.
+- **Production:** The production workflow is configured for `main` with a required GitHub Environment reviewer approval. Production AWS infrastructure has not yet been provisioned, so production deployment is not ready to run.
 
-```text
-mbeautycakes_mysql_data
+## Deployment Runbook
+
+The operational runbook contains the detailed procedures for infrastructure setup, application deployment, health verification, CloudWatch monitoring, database migrations, troubleshooting and rollback.
+
+See: [Deployment Runbook](docs/deployment-runbook.md).
+
+### Health Verification
+
+The deployment workflow checks the application homepage and cake API. The backend health endpoint is `/health`. Example commands:
+
+```powershell
+curl.exe -f http://<ALB-DNS>/
+curl.exe -f http://<ALB-DNS>/api/cakes
 ```
 
-This allows database data to survive container restarts and container recreation.
+The cake API should return the seeded cake records. Review ECS service events and CloudWatch logs when a task or health check fails.
 
-The database schema is stored in:
+### Rollback
 
-```text
-database/schema.sql
-```
+The deployment workflow captures the previous frontend and backend task definition ARNs. On a post-deployment failure, it attempts to restore those task definitions and waits for service stability. ECS deployment circuit breakers with rollback are also enabled.
 
+The rollback recovery time has not yet been measured against the project 60-second target.
 
-## ☁️ AWS Deployment
+## Monthly AWS Cost Estimate
 
-The application is designed to be deployed on an AWS EC2 instance using Docker Compose.
+The estimated staging baseline is approximately **US$110 per month**, assuming 730 operating hours, four minimum Fargate tasks (two frontend and two backend), one Application Load Balancer, six public IPv4 addresses and one Single-AZ `db.t3.micro` RDS MySQL instance with 20 GB gp3 storage.
 
-Deployment flow:
+This is an approximate planning estimate, not an AWS quote. Actual charges vary with traffic, LCU usage, log ingestion, data transfer, backups, taxes and current AWS pricing. Development resources are not included. Scaling ECS tasks above the minimum increases costs.
 
-```text
-GitHub
-   │
-   ▼
-AWS EC2
-   │
-   ▼
-Docker
-   │
-   ▼
-Docker Compose
-   │
-   ├── Frontend + Nginx
-   ├── Backend
-   └── MySQL
-   │
-   ▼
-Public IP
-```
+See the detailed assumptions and calculation: [AWS Monthly Cost Estimate](docs/aws-cost-estimate.md).
 
-### Planned AWS setup
+## Current Implementation Status
 
-- Ubuntu EC2 instance
-- Docker
-- Docker Compose
-- Security Group
-- Nginx
-- Persistent Docker volume
-- Public HTTP access
+| Requirement | Status |
+|---|---|
+| Terraform VPC and subnet modules | Implemented |
+| ECS Fargate and Application Load Balancer | Implemented |
+| ECR repositories | Implemented |
+| IAM roles, security groups and GitHub OIDC | Implemented |
+| S3 remote Terraform state and locking | Implemented |
+| RDS MySQL and application secrets | Implemented |
+| CloudWatch log groups | Implemented |
+| Development deployment | Deployed and tested |
+| Staging deployment | Deployed and tested |
+| Production workflow and approval gate | Configured; production infrastructure not provisioned |
+| Automated deployment recovery | Implemented; recovery time not yet measured |
 
+## Security Practices
 
-## 🔐 Security
+- GitHub Actions uses OIDC for AWS authentication instead of long-lived AWS access keys.
+- JWT secrets are stored in AWS Systems Manager Parameter Store.
+- The RDS master password is managed through AWS Secrets Manager.
+- IAM permissions are scoped to the required deployment resources.
+- The RDS database is not publicly accessible.
+- Terraform state and account-specific variable files are not committed.
+- Production deployment is protected by GitHub Environment approval.
 
-Sensitive files are excluded using `.gitignore`.
+## Project Documentation
 
-Examples:
+- [Architecture](docs/architecture.md)
+- [CI/CD Pipeline](docs/cicd-pipeline.md)
+- [Deployment Runbook](docs/deployment-runbook.md)
+- [AWS Cost Estimate](docs/aws-cost-estimate.md)
+- [Deployment Evidence](docs/evidence/)
 
-```text
-.env
-backend/.env
-database/*-backup.sql
-```
-
-The MySQL database is intended for internal Docker communication rather than public internet access.
-
-
-## 📌 Current Status
-
-### Application
-
-- ✅ React frontend
-- ✅ Node.js / Express backend
-- ✅ MySQL database
-- ✅ User authentication
-- ✅ Cart functionality
-- ✅ Checkout
-- ✅ Order management
-- ✅ Category filtering
-
-### Docker
-
-- ✅ Frontend Docker image
-- ✅ Multi-stage frontend build
-- ✅ Nginx
-- ✅ Backend container
-- ✅ MySQL container
-- ✅ Docker Compose
-- ✅ Persistent MySQL volume
-- ✅ Service networking
-- ✅ Health checks
-
-### Version Control
-
-- ✅ Git repository
-- ✅ GitHub repository
-- ✅ Public repository
-
-### Deployment
-
-- ⏳ AWS EC2 deployment
-- ⏳ Production public URL
-- ⏳ HTTPS / domain configuration
-
-
-## 🎯 Future Improvements
-
-- Online payment integration
-- Email order notifications
-- Custom cake orders
-- Birthday and wedding cake collections
-- Product search
-- Wishlist persistence
-- HTTPS with custom domain
-- CI/CD pipeline
-- AWS managed database integration
-
-
-## 👨‍💻 Author
+## Author
 
 **Hitesh Gupta**
 
-GitHub:
-
-https://github.com/HiteshGupta03
-
-Repository:
-
-https://github.com/HiteshGupta03/mbeautycakes
+GitHub: [HiteshGupta03](https://github.com/HiteshGupta03)
+Capstone Repository: [infra-as-code-pipeline](https://github.com/HiteshGupta03/infra-as-code-pipeline)
